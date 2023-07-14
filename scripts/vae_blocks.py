@@ -1,29 +1,32 @@
 import torch
-
-def fp16_clip(self, x, *args, **kwargs):
-    x_orig = x
-    iters = 0
-    max_iters = 5
-    while True:
-        x = torch.clip(x, -self.clip_th, self.clip_th)
-        x = self.orig_forward(x, *args, **kwargs)
-        iters += 1
-        if torch.any(torch.isnan(x)):
-            self.clip_th *= self.clip_fail
-            if iters > max_iters:
-                # Failed to clip
-                print('fp16 VAE failed to clip inputs')
-                break
-            x = x_orig
-            continue
-        else:
-            self.clip_th = min(65504, self.clip_th * self.clip_succ)
-            break
-    return x
+from torch.nn.functional import silu
 
 def nonlinearity(x):
-    # swish
-    return x*torch.sigmoid(x)
+    return silu(x)
+
+def replaced_forward(self, x, temb):
+    x = x.to(dtype=torch.float32)
+    h = x
+    h = self.norm1(h)
+    h = h.to(dtype=self.precision)
+    h = nonlinearity(h)
+    h = self.conv1(h)
+
+    if temb is not None:
+        h = h + self.temb_proj(nonlinearity(temb))[:, :, None, None]
+
+    h = self.norm2(h)
+    h = nonlinearity(h)
+    h = self.dropout(h)
+    h = self.conv2(h.to(torch.float32))
+
+    if self.in_channels != self.out_channels:
+        if self.use_conv_shortcut:
+            x = self.conv_shortcut(x)
+        else:
+            x = self.nin_shortcut(x)
+
+    return x + h
 
 def decoder_forward(self, z, **kwargs):
     self.last_z_shape = z.shape
@@ -53,20 +56,10 @@ def decoder_forward(self, z, **kwargs):
         return h
 
     h_orig = h
-    iters = 0
-    while iters < 5:
-        iters += 1
-        h = torch.clip(h, -self.clip_th, self.clip_th)
-        h = self.norm_out(h)
-        h = nonlinearity(h)
-        h = self.conv_out(h, **kwargs)
-        if self.tanh_out:
-            h = torch.tanh(h)
-        if torch.any(torch.isnan(h)):
-            self.clip_th *= self.clip_fail
-            h = h_orig
-            continue
-        else:
-            self.clip_th = min(65504, self.clip_th * self.clip_succ)
-            break
+    h = self.norm_out(h.to(dtype=torch.float32))
+    h = nonlinearity(h)
+    h = self.conv_out(h, **kwargs)
+    if self.tanh_out:
+        h = torch.tanh(h)
+    h = h.to(dtype=self.precision)
     return h

@@ -1,13 +1,15 @@
-# sd-webui-fp16vae
+# sd-webui-mixed-precision-vae
 
 This is an extension for [AUTOMATIC111
 stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui).
 
 Some Stable Diffusion VAEs generate nans when using half precision format. These
 NANs are caused by values exceeding the half precision floating point range of
--65504 to +65504. This extension clips the VAE decoder inputs at each layer to
-avoid NAN values. The difference to single precision VAE should be
-imperceptible. This extension does not help with nans produced in the U-Net.
+-65504 to +65504. This extension uses single precision for layers that can
+generate these high values and half precision for the rest of the layers.  When
+run in mixed precision VAE uses less VRAM and is faster. The difference in the
+resulting images compared to single precision VAE should be very small. This
+extension does not help with nans produced in the U-Net.
 
 # Installation
 
@@ -19,10 +21,11 @@ imperceptible. This extension does not help with nans produced in the U-Net.
 
 # Usage
 
-There are no configurable options. The clipping is applied automatically when
-VAE is loaded in half precision. If single precision VAE is used
-(`--no-half-vae`) no clipping is applied. When clipping is applied a message
-`fp16 VAE clipping applied` is printed to terminal.
+There are no configurable options. The extension is applied automatically when
+VAE is loaded in half precision at the start of image generation. If single
+precision VAE is used (`--no-half-vae`) extension is not applied. A message is
+printed to the output terminal after generating the first image if the
+extensions has been applied or not.
 
 This extensions should be compatible with Stable Diffusion versions, 1.x, 2.x
 and SDXL.
