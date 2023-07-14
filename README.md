@@ -11,6 +11,23 @@ run in mixed precision VAE uses less VRAM and is faster. The difference in the
 resulting images compared to single precision VAE should be very small. This
 extension does not help with nans produced in the U-Net.
 
+# Benchmarks
+
+SDXL model, 1024x1024 image.
+
+Runtime:
+no-half-vae: 1.8s
+mixed precision: 1.6s
+
+VAE parameter size:
+fp16: 0.17 GB
+mixed: 0.21 GB
+fp32: 0.33 GB
+
+Peak VRAM usage (MB):
+no-half-vae: 6814
+mixed precision: 6552
+
 # Installation
 
 1. Open "Extensions" tab.
