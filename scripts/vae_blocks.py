@@ -1,5 +1,20 @@
 import torch
 
+def fp16_clip(self, x, *args, **kwargs):
+    x_orig = x
+    iters = 0
+    while iters < 5:
+        x = self.orig_forward(x, *args, **kwargs)
+        iters += 1
+        if torch.any(torch.isnan(x)):
+            self.clip_th *= self.clip_fail
+            x = x_orig
+            continue
+        else:
+            self.clip_th = min(65504, self.clip_th * self.clip_succ)
+            break
+    return x
+
 def nonlinearity(x):
     # swish
     return x*torch.sigmoid(x)
@@ -32,7 +47,9 @@ def decoder_forward(self, z):
         return h
 
     h_orig = h
-    while True:
+    iters = 0
+    while iters < 5:
+        iters += 1
         h = torch.clip(h, -self.clip_th, self.clip_th)
         h = self.norm_out(h)
         h = nonlinearity(h)
@@ -45,36 +62,5 @@ def decoder_forward(self, z):
             continue
         else:
             self.clip_th = min(65504, self.clip_th * self.clip_succ)
-        return h
-
-def replaced_forward(self, x, temb):
-    x_orig = x
-    while True:
-        x = torch.clip(x, -self.clip_th, self.clip_th)
-        h = x
-        h = self.norm1(h)
-        h = nonlinearity(h)
-        h = self.conv1(h)
-
-        if temb is not None:
-            h = h + self.temb_proj(nonlinearity(temb))[:,:,None,None]
-
-        h = self.norm2(h)
-        h = nonlinearity(h)
-        h = self.dropout(h)
-        h = self.conv2(h)
-
-        if self.in_channels != self.out_channels:
-            if self.use_conv_shortcut:
-                x = self.conv_shortcut(x)
-            else:
-                x = self.nin_shortcut(x)
-
-        o = x+h
-        if torch.any(torch.isnan(o)):
-            self.clip_th *= self.clip_fail
-            x = x_orig
-            continue
-        else:
-            self.clip_th = min(65504, self.clip_th * self.clip_succ)
-        return o
+            break
+    return h

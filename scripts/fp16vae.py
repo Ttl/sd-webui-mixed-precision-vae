@@ -38,8 +38,10 @@ class Script(scripts.Script):
                 m.clip_succ = succ
                 m.vaefp16_replaced = True
                 m.orig_forward = m.forward
-                m.forward = types.MethodType(vae_blocks.replaced_forward, m)
+                m.forward = types.MethodType(vae_blocks.fp16_clip, m)
             elif m.__class__.__name__ == "Decoder":
+                # Decoder can't use the wrapper function because it calls all the
+                # other blocks and clipping should be only applied to conv_out
                 if not enabled:
                     print('Undoing fp16 VAE clipping')
                     m.vaefp16_replaced = False
