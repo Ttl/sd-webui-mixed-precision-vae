@@ -18,7 +18,7 @@ class Script(scripts.Script):
         for p in params:
             p = p.to(dtype=precision)
 
-    def process_batch(self, p, *args, **kwargs):
+    def before_process(self, p, *args, **kwargs):
         if 0:
             # Uncomment to print the VAE parameter size
             params = 0
@@ -33,6 +33,18 @@ class Script(scripts.Script):
             print('Skipping mixed precision VAE extension due to VAE being in fp32 precision')
             return
 
+        # Encoder
+        p.sd_model.first_stage_model.encoder.mixed_weights = [p.sd_model.first_stage_model.encoder.norm_out,
+                p.sd_model.first_stage_model.encoder.conv_out,
+                p.sd_model.first_stage_model.encoder.mid.attn_1]
+        p.sd_model.first_stage_model.encoder.mixed_precision = False
+        p.sd_model.first_stage_model.encoder.precision = precision
+        p.sd_model.first_stage_model.encoder.orig_forward = p.sd_model.first_stage_model.encoder.forward
+        p.sd_model.first_stage_model.encoder.cast_weights = types.MethodType(vae_blocks.cast_weights,
+                                                              p.sd_model.first_stage_model.encoder)
+        p.sd_model.first_stage_model.encoder.forward = types.MethodType(vae_blocks.encoder_forward,
+                                                            p.sd_model.first_stage_model.encoder)
+        # Decoder
         p.sd_model.first_stage_model.decoder.mixed_weights = [p.sd_model.first_stage_model.decoder.conv_out,
                                                               p.sd_model.first_stage_model.decoder.norm_out]
         p.sd_model.first_stage_model.decoder.mixed_precision = False
@@ -43,7 +55,7 @@ class Script(scripts.Script):
         p.sd_model.first_stage_model.decoder.forward = types.MethodType(vae_blocks.decoder_forward,
                                                             p.sd_model.first_stage_model.decoder)
 
-        for m in p.sd_model.first_stage_model.decoder.up.modules():
+        for m in p.sd_model.first_stage_model.modules():
             if m.__class__.__name__ == "ResnetBlock":
                 mixed_weights = [m.norm1, m.conv2]
                 if hasattr(m, 'nin_shortcut'):
@@ -56,9 +68,9 @@ class Script(scripts.Script):
                 m.mixed_precision = False
                 m.cast_weights = types.MethodType(vae_blocks.cast_weights, m)
                 m.forward = types.MethodType(vae_blocks.replaced_forward, m)
-            elif m.__class__.__name__ == "Upsample":
+            elif m.__class__.__name__ in ["Upsample", "Downsample"]:
                 m.precision = precision
-                m.mixed_weights = [m.conv]
+                m.mixed_weights = [m]
                 m.orig_forward = m.forward
                 m.mixed_precision = False
                 m.cast_weights = types.MethodType(vae_blocks.cast_weights, m)

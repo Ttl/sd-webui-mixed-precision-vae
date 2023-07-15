@@ -5,7 +5,7 @@ def nonlinearity(x):
     return silu(x)
 
 def cast_weights(self):
-    print('Casting VAE layer to fp32 because fp16 range exceeded')
+    print('Casting VAE layer to fp32')
     for w in self.mixed_weights:
         w = w.to(dtype=torch.float32)
     self.mixed_precision = True
@@ -70,6 +70,49 @@ def replaced_forward(self, x, temb):
 
     return out
 
+def encoder_forward(self, x):
+    # timestep embedding
+    temb = None
+
+    # downsampling
+    hs = [self.conv_in(x)]
+    for i_level in range(self.num_resolutions):
+        for i_block in range(self.num_res_blocks):
+            h = self.down[i_level].block[i_block](hs[-1], temb)
+            if len(self.down[i_level].attn) > 0:
+                h = self.down[i_level].attn[i_block](h)
+            hs.append(h)
+        if i_level != self.num_resolutions - 1:
+            hs.append(self.down[i_level].downsample(hs[-1]))
+
+    # middle
+    h = hs[-1]
+    if h.dtype == torch.float32 and not self.mixed_precision:
+        self.cast_weights()
+        h_orig = None
+    else:
+        h_orig = h
+    while True:
+        if self.mixed_precision:
+            h = h.to(dtype=torch.float32)
+        h = self.mid.block_1(h, temb)
+        h = self.mid.attn_1(h)
+        h = self.mid.block_2(h, temb)
+
+        # end
+        h = self.norm_out(h)
+        h = nonlinearity(h)
+        h = self.conv_out(h)
+        if self.mixed_precision:
+            h = h.to(dtype=self.precision)
+        if not self.mixed_precision:
+            if not torch.all(torch.isfinite(h)):
+                self.cast_weights()
+                h = h_orig
+                continue
+        break
+    return h
+
 def decoder_forward(self, z, **kwargs):
     self.last_z_shape = z.shape
 
@@ -99,7 +142,9 @@ def decoder_forward(self, z, **kwargs):
 
     if h.dtype == torch.float32 and not self.mixed_precision:
         self.cast_weights()
-    h_orig = h
+        h_orig = None
+    else:
+        h_orig = h
     while True:
         if self.mixed_precision:
             h.to(dtype=torch.float32)
@@ -113,7 +158,7 @@ def decoder_forward(self, z, **kwargs):
         if not self.mixed_precision:
             if not torch.all(torch.isfinite(h)):
                 self.cast_weights()
+                h = h_orig
                 continue
         break
-
     return h

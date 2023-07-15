@@ -16,13 +16,14 @@ VAE should be extremely small.
 
 SDXL model, 1024x1024 image.
 
-VAE runtime:
+VAE decoder runtime:
 no-half-vae: 1.8s
 mixed precision: 1.6s
 
 VAE parameter size:
 fp16: 0.167 GB
-mixed: 0.169 GB
+mixed (txt2img): 0.169 GB
+mixed (img2img): 0.195 GB
 fp32: 0.335 GB
 
 # Installation
