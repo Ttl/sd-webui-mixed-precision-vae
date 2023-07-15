@@ -4,29 +4,71 @@ from torch.nn.functional import silu
 def nonlinearity(x):
     return silu(x)
 
+def cast_weights(self):
+    print('Casting VAE layer to fp32 because fp16 range exceeded')
+    for w in self.mixed_weights:
+        w = w.to(dtype=torch.float32)
+    self.mixed_precision = True
+
+def wrapped_mixed_forward(self, x, *args, **kwargs):
+    if not self.mixed_precision and x.dtype == torch.float32:
+        self.cast_weights()
+    if self.mixed_precision:
+        # No need to cache input here because layer is already in fp32
+        x = x.to(dtype=torch.float32)
+        out = self.orig_forward(x, *args, **kwargs)
+    else:
+        # We need to cache input in case the output blows up
+        x_orig = x
+        while True:
+            if self.mixed_precision:
+                x = x.to(dtype=torch.float32)
+            out = self.orig_forward(x, *args, **kwargs)
+            if not torch.all(torch.isfinite(out)):
+                self.cast_weights()
+                x = x_orig
+                del x_orig
+                continue
+            break
+    return out
+
 def replaced_forward(self, x, temb):
-    x = x.to(dtype=torch.float32)
-    h = x
-    h = self.norm1(h)
-    h = h.to(dtype=self.precision)
-    h = nonlinearity(h)
-    h = self.conv1(h)
+    if x.dtype == torch.float32 and not self.mixed_precision:
+        self.cast_weights()
+    while True:
+        if self.mixed_precision:
+            x = x.to(dtype=torch.float32)
+        h = x
+        h = self.norm1(h)
+        if self.mixed_precision:
+            h = h.to(dtype=self.precision)
+        h = nonlinearity(h)
+        h = self.conv1(h)
 
-    if temb is not None:
-        h = h + self.temb_proj(nonlinearity(temb))[:, :, None, None]
+        if temb is not None:
+            h = h + self.temb_proj(nonlinearity(temb))[:, :, None, None]
 
-    h = self.norm2(h)
-    h = nonlinearity(h)
-    h = self.dropout(h)
-    h = self.conv2(h.to(torch.float32))
+        h = self.norm2(h)
+        h = nonlinearity(h)
+        h = self.dropout(h)
+        if self.mixed_precision:
+            h = h.to(dtype=torch.float32)
+        h = self.conv2(h)
 
-    if self.in_channels != self.out_channels:
-        if self.use_conv_shortcut:
-            x = self.conv_shortcut(x)
+        if self.in_channels != self.out_channels:
+            if self.use_conv_shortcut:
+                out = self.conv_shortcut(x) + h
+            else:
+                out = self.nin_shortcut(x) + h
         else:
-            x = self.nin_shortcut(x)
+            out = x + h
+        if not self.mixed_precision:
+            if not torch.all(torch.isfinite(out)):
+                self.cast_weights()
+                continue
+        break
 
-    return x + h
+    return out
 
 def decoder_forward(self, z, **kwargs):
     self.last_z_shape = z.shape
@@ -55,11 +97,23 @@ def decoder_forward(self, z, **kwargs):
     if self.give_pre_end:
         return h
 
+    if h.dtype == torch.float32 and not self.mixed_precision:
+        self.cast_weights()
     h_orig = h
-    h = self.norm_out(h.to(dtype=torch.float32))
-    h = nonlinearity(h)
-    h = self.conv_out(h, **kwargs)
-    if self.tanh_out:
-        h = torch.tanh(h)
-    h = h.to(dtype=self.precision)
+    while True:
+        if self.mixed_precision:
+            h.to(dtype=torch.float32)
+        h = self.norm_out(h)
+        h = nonlinearity(h)
+        h = self.conv_out(h, **kwargs)
+        if self.tanh_out:
+            h = torch.tanh(h)
+        if self.mixed_precision:
+            h = h.to(dtype=self.precision)
+        if not self.mixed_precision:
+            if not torch.all(torch.isfinite(h)):
+                self.cast_weights()
+                continue
+        break
+
     return h

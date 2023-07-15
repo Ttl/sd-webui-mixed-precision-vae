@@ -4,29 +4,26 @@ This is an extension for [AUTOMATIC111
 stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui).
 
 Some Stable Diffusion VAEs generate nans when using half precision format. These
-NANs are caused by values exceeding the half precision floating point range of
--65504 to +65504. This extension uses single precision for layers that can
-generate these high values and half precision for the rest of the layers.  When
-run in mixed precision VAE uses less VRAM and is faster. The difference in the
-resulting images compared to single precision VAE should be very small. This
-extension does not help with nans produced in the U-Net.
+nans are caused by values exceeding the half precision floating point range of
+-65504 to +65504. This extension dynamically uses single precision only for
+layers that exceed the half precision range. Compared to using `--no-half-vae`
+that casts all weights to single precision this saves VRAM and is faster. If the
+VAE does not blow up in half precision then no layers are converted avoiding
+overhead. The difference in the resulting images compared to single precision
+VAE should be extremely small.
 
 # Benchmarks
 
 SDXL model, 1024x1024 image.
 
-Runtime:
+VAE runtime:
 no-half-vae: 1.8s
 mixed precision: 1.6s
 
 VAE parameter size:
-fp16: 0.17 GB
-mixed: 0.21 GB
-fp32: 0.33 GB
-
-Peak VRAM usage (MB):
-no-half-vae: 6814
-mixed precision: 6552
+fp16: 0.167 GB
+mixed: 0.169 GB
+fp32: 0.335 GB
 
 # Installation
 
@@ -38,11 +35,12 @@ mixed precision: 6552
 
 # Usage
 
-There are no configurable options. The extension is applied automatically when
-VAE is loaded in half precision at the start of image generation. If single
-precision VAE is used (`--no-half-vae`) extension is not applied. A message is
-printed to the output terminal after generating the first image if the
-extensions has been applied or not.
+There are no configurable options. The extension is applied automatically at the
+start of image generation if VAE has been loaded in half precision. If single
+precision VAE is used (`--no-half-vae`) the extension is not applied. A message
+is printed to the output terminal after generating the first image if the
+extensions has been applied or not. A message is also printed if any of the
+layers are converted to single precision.
 
 This extensions should be compatible with Stable Diffusion versions, 1.x, 2.x
 and SDXL.
